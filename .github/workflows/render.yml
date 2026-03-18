@@ -1,0 +1,91 @@
+name: Render Park Map
+
+on:
+  push:
+    paths:
+      - "park/**"
+  workflow_dispatch:
+    inputs:
+      label:
+        description: "Snapshot label (leave blank for current date/time)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      APPIMAGE_EXTRACT_AND_RUN: 1
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Install OpenRCT2 system dependencies
+        run: >
+          sudo apt-get update -qq && sudo apt-get install -y -qq
+          libgbm1 libasound2t64 libwayland-client0
+          libfontconfig1 libfreetype6 libharfbuzz0b
+          libxml2 libglib2.0-0t64 libgraphite2-3
+
+      - name: Fetch openrct2-map tool
+        run: git clone --depth 1 https://github.com/leoherzog/openrct2-map.git openrct2-map
+
+      - name: Restore cached OpenRCT2 binary and game assets
+        id: cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            openrct2-map/OpenRCT2-*.AppImage
+            openrct2-map/assets/RCT
+          key: openrct2-assets-v1
+
+      - name: Find park file
+        id: park
+        run: |
+          PARK=$(find park/ -type f \( -iname '*.park' -o -iname '*.sv6' -o -iname '*.sc6' -o -iname '*.sv4' \) -print -quit)
+          if [ -z "$PARK" ]; then
+            echo "::error::No park file found in park/ directory"
+            exit 1
+          fi
+          echo "file=$PARK" >> "$GITHUB_OUTPUT"
+          echo "Found park file: $PARK"
+
+      - name: Render map
+        working-directory: openrct2-map
+        run: |
+          ARGS=(
+            "../${{ steps.park.outputs.file }}"
+            -o ../output
+            --domain "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
+          )
+          if [ -n "${{ inputs.label }}" ]; then
+            ARGS+=(--label "${{ inputs.label }}")
+          fi
+          deno run -A main.ts "${ARGS[@]}"
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload to Pages
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: output
+
+      - name: Deploy to Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
