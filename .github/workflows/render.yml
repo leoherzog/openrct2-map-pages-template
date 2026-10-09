@@ -29,11 +29,7 @@ jobs:
     env:
       APPIMAGE_EXTRACT_AND_RUN: 1
     steps:
-      - uses: actions/checkout@v6
-
-      - uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
+      - uses: actions/checkout@v7
 
       - name: Install OpenRCT2 system dependencies
         run: >
@@ -42,12 +38,27 @@ jobs:
           libfontconfig1 libfreetype6 libharfbuzz0b
           libxml2 libglib2.0-0t64 libgraphite2-3
 
-      - name: Fetch openrct2-map tool
-        run: git clone --depth 1 https://github.com/leoherzog/openrct2-map.git openrct2-map
+      - name: Fetch latest openrct2-map release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=$(gh api repos/leoherzog/openrct2-map/releases/latest --jq .tag_name)
+          echo "Using openrct2-map $TAG"
+          # Sparse, blobless clone skips the example map's tiles
+          git clone --depth 1 --branch "$TAG" --filter=blob:none --sparse https://github.com/leoherzog/openrct2-map.git openrct2-map
+          git -C openrct2-map sparse-checkout set assets
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+
+      - name: Install openrct2-map dependencies
+        working-directory: openrct2-map
+        run: npm ci
 
       - name: Restore cached OpenRCT2 binary and game assets
         id: cache
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             openrct2-map/OpenRCT2-*.AppImage
@@ -76,16 +87,16 @@ jobs:
           if [ -n "${{ inputs.label }}" ]; then
             ARGS+=(--label "${{ inputs.label }}")
           fi
-          deno run -A main.ts "${ARGS[@]}"
+          node main.ts "${ARGS[@]}"
 
       - name: Configure Pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
 
       - name: Upload to Pages
-        uses: actions/upload-pages-artifact@v4
+        uses: actions/upload-pages-artifact@v5
         with:
           path: output
 
       - name: Deploy to Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
